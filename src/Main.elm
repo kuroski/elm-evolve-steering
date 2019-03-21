@@ -31,7 +31,6 @@ maxSpeed =
 
 magnitude : ( Float, Float ) -> Float
 magnitude ( x, y ) =
-    -- 93, 43
     ((x * x) + (y * y))
         |> sqrt
 
@@ -168,46 +167,34 @@ steerForce ( pointX, pointY ) ( velocityX, velocityY ) =
     ( normalizedX - velocityX, normalizedY - velocityY )
 
 
+updateVehiclesPopulation : List Vehicle -> List Vehicle
+updateVehiclesPopulation =
+    List.map
+        (\vehicle ->
+            let
+                -- BOUNDARIES
+                ( steerX, steerY ) =
+                    steerForce vehicle.point vehicle.velocity
+
+                ( accelerationX, accelerationY ) =
+                    Tuple.mapBoth ((+) steerX) ((+) steerY) vehicle.acceleration
+
+                -- MOTION
+                ( velocityX, velocityY ) =
+                    Tuple.mapBoth ((+) accelerationX) ((+) accelerationY) vehicle.velocity
+
+                newPoint =
+                    Tuple.mapBoth ((+) velocityX) ((+) velocityY) vehicle.point
+            in
+            { vehicle | point = newPoint, velocity = ( velocityX, velocityY ), acceleration = ( accelerationX * 0, accelerationY * 0 ) }
+        )
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         Frame _ ->
-            let
-                newPopulation =
-                    List.map
-                        (\vehicle ->
-                            let
-                                -- BOUNDARIES
-                                ( steerX, steerY ) =
-                                    steerForce vehicle.point vehicle.velocity
-
-                                newAcceleration =
-                                    Tuple.mapBoth ((+) steerX) ((+) steerY) vehicle.acceleration
-
-                                -- MOTION
-                                accelerationX =
-                                    Tuple.first newAcceleration
-
-                                accelerationY =
-                                    Tuple.second newAcceleration
-
-                                newVelocity =
-                                    Tuple.mapBoth ((+) accelerationX) ((+) accelerationY) vehicle.velocity
-
-                                velocityX =
-                                    Tuple.first newVelocity
-
-                                velocityY =
-                                    Tuple.second newVelocity
-
-                                newPoint =
-                                    Tuple.mapBoth ((+) velocityX) ((+) velocityY) vehicle.point
-                            in
-                            { vehicle | velocity = newVelocity, point = newPoint, acceleration = ( accelerationX * 0, accelerationY * 0 ) }
-                        )
-                        model.vehicles
-            in
-            ( { model | vehicles = newPopulation }, Cmd.none )
+            ( { model | vehicles = updateVehiclesPopulation model.vehicles }, Cmd.none )
 
         NewVehicle vehicle ->
             ( { model | vehicles = vehicle :: model.vehicles }, Cmd.none )
