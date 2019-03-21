@@ -25,6 +25,10 @@ maxSpeed =
     3.0
 
 
+maxForce =
+    0.5
+
+
 
 ---- HELPERS ----
 
@@ -155,7 +159,7 @@ type alias Dna =
 
 
 type alias ClosestFood =
-    { object : Point, distance : Float }
+    { food : Point, distance : Float }
 
 
 type alias Vehicle =
@@ -168,16 +172,14 @@ type alias Vehicle =
 
 
 type alias Model =
-    { maxForce : Float
-    , vehicles : List Vehicle
+    { vehicles : List Vehicle
     , foods : List Point
     }
 
 
 init : ( Model, Cmd Msg )
 init =
-    ( { maxForce = 0.5
-      , vehicles = []
+    ( { vehicles = []
       , foods = []
       }
     , Cmd.batch
@@ -269,6 +271,92 @@ updateVehiclesPopulation =
         )
 
 
+findClosestFood : List Point -> List Vehicle -> List Vehicle
+findClosestFood foods vehicles =
+    vehicles
+        |> List.map
+            (\vehicle ->
+                let
+                    ( pointX, pointY ) =
+                        vehicle.point
+
+                    closestFood =
+                        foods
+                            |> List.foldl
+                                (\food acc ->
+                                    let
+                                        ( foodX, foodY ) =
+                                            food
+
+                                        distance =
+                                            magnitude ( foodX - pointX, foodY - pointY )
+                                    in
+                                    if distance < vehicle.dna.foodSense then
+                                        case acc of
+                                            Just closest ->
+                                                if distance < closest.distance then
+                                                    Just (ClosestFood food closest.distance)
+
+                                                else
+                                                    acc
+
+                                            Nothing ->
+                                                Just (ClosestFood food distance)
+
+                                    else
+                                        acc
+                                )
+                                Nothing
+                in
+                case closestFood of
+                    Just closest ->
+                        { vehicle | closestFood = Just closest }
+
+                    _ ->
+                        vehicle
+            )
+
+
+eatFood : List Point -> List Vehicle -> List Point
+eatFood foods vehicles =
+    foods
+        |> List.filter
+            (\point ->
+                let
+                    closestVehicle =
+                        vehicles
+                            |> findInList
+                                (\vehicle ->
+                                    case vehicle.closestFood of
+                                        Just closestFood ->
+                                            if closestFood.food == point then
+                                                True
+
+                                            else
+                                                False
+
+                                        Nothing ->
+                                            False
+                                )
+                in
+                case closestVehicle of
+                    Just { closestFood } ->
+                        case closestFood of
+                            Just { distance } ->
+                                if distance < 15 then
+                                    False
+
+                                else
+                                    True
+
+                            Nothing ->
+                                True
+
+                    Nothing ->
+                        True
+            )
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
@@ -276,88 +364,42 @@ update msg model =
             let
                 -- EAT
                 newVehiclesPopulation =
-                    model.vehicles
+                    findClosestFood model.foods model.vehicles
+
+                newFoodPopulation =
+                    eatFood model.foods newVehiclesPopulation
+
+                -- SEEK
+                newNewVehiclesPopulation =
+                    newVehiclesPopulation
                         |> List.map
                             (\vehicle ->
-                                let
-                                    ( pointX, pointY ) =
-                                        vehicle.point
+                                case vehicle.closestFood of
+                                    Just closestFood ->
+                                        let
+                                            ( foodX, foodY ) =
+                                                closestFood.food
 
-                                    closestFood =
-                                        model.foods
-                                            |> List.foldl
-                                                (\food acc ->
-                                                    let
-                                                        ( foodX, foodY ) =
-                                                            food
+                                            ( pointX, pointY ) =
+                                                vehicle.point
 
-                                                        distance =
-                                                            magnitude ( foodX - pointX, foodY - pointY )
-                                                    in
-                                                    if distance < vehicle.dna.foodSense then
-                                                        case acc.closestDistance of
-                                                            Just closestDistance ->
-                                                                if distance < closestDistance then
-                                                                    { acc | closest = Just food, closestDistance = Just closestDistance }
+                                            ( accelerationX, accelerationY ) =
+                                                vehicle.acceleration
 
-                                                                else
-                                                                    acc
-
-                                                            Nothing ->
-                                                                { acc | closest = Just food, closestDistance = Just distance }
-
-                                                    else
-                                                        acc
-                                                )
-                                                { closest = Nothing, closestDistance = Nothing }
-                                in
-                                case ( closestFood.closest, closestFood.closestDistance ) of
-                                    ( Just closest, Just distance ) ->
-                                        { vehicle | closestFood = Just (ClosestFood closest distance) }
-
-                                    _ ->
-                                        vehicle
-                            )
-
-                newObjectsPopulation =
-                    model.foods
-                        |> List.filter
-                            (\point ->
-                                let
-                                    closestVehicle =
-                                        model.vehicles
-                                            |> findInList
-                                                (\vehicle ->
-                                                    case vehicle.closestFood of
-                                                        Just closestFood ->
-                                                            if closestFood.object == point then
-                                                                True
-
-                                                            else
-                                                                False
-
-                                                        Nothing ->
-                                                            False
-                                                )
-                                in
-                                case closestVehicle of
-                                    Just { closestFood } ->
-                                        case closestFood of
-                                            Just { distance } ->
-                                                if distance < 5 then
-                                                    False
-
-                                                else
-                                                    True
-
-                                            Nothing ->
-                                                True
+                                            ( steerX, steerY ) =
+                                                ( foodX - pointX, foodY - pointY )
+                                                    |> normalize
+                                                    |> Tuple.mapBoth ((*) maxSpeed) ((*) maxSpeed)
+                                                    |> Tuple.mapBoth ((*) vehicle.dna.foodAttraction) ((*) vehicle.dna.foodAttraction)
+                                                    |> limit maxForce
+                                        in
+                                        { vehicle | closestFood = Nothing, acceleration = ( accelerationX + steerX, accelerationY + steerY ) }
 
                                     Nothing ->
-                                        True
+                                        { vehicle | closestFood = Nothing }
                             )
             in
-            ( { model | vehicles = updateVehiclesPopulation newVehiclesPopulation, foods = newObjectsPopulation }, Cmd.none )
+            ( { model | vehicles = updateVehiclesPopulation newNewVehiclesPopulation, foods = newFoodPopulation }, Cmd.none )
 
         NewVehicles vehicles ->
             ( { model | vehicles = List.append vehicles model.vehicles }, Cmd.none )
