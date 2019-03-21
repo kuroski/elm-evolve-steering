@@ -29,9 +29,30 @@ maxSpeed =
 ---- HELPERS ----
 
 
+limit : Float -> ( Float, Float ) -> ( Float, Float )
+limit max ( x, y ) =
+    let
+        magSquare =
+            magnitudeSquare ( x, y )
+
+        squareRoot =
+            sqrt magSquare
+    in
+    if magSquare > (max * max) then
+        ( (x / squareRoot) * max, (y / squareRoot) * max )
+
+    else
+        ( x, y )
+
+
+magnitudeSquare : ( Float, Float ) -> Float
+magnitudeSquare ( x, y ) =
+    (x * x) + (y * y)
+
+
 magnitude : ( Float, Float ) -> Float
-magnitude ( x, y ) =
-    ((x * x) + (y * y))
+magnitude value =
+    magnitudeSquare value
         |> sqrt
 
 
@@ -56,7 +77,7 @@ randomAccelerationGenerator =
 
 randomVelocityGenerator : Random.Generator Velocity
 randomVelocityGenerator =
-    Random.map2 (\x y -> normalize ( x, y )) (Random.float 0 100) (Random.float 0 100)
+    Random.map2 (\x y -> normalize ( x, y )) (Random.float 0 1) (Random.float 0 1)
 
 
 randomVehicleGenerator : Random.Generator Vehicle
@@ -123,15 +144,15 @@ type Msg
 steerForce : Point -> Velocity -> ( Float, Float )
 steerForce ( pointX, pointY ) ( velocityX, velocityY ) =
     let
-        limit =
+        maxBoundary =
             10
 
         desiredX =
-            if pointX < limit then
+            if pointX < maxBoundary then
                 -- goes right
                 Just maxSpeed
 
-            else if pointX > (width - limit) then
+            else if pointX > (width - maxBoundary) then
                 -- goes left
                 Just -maxSpeed
 
@@ -139,11 +160,11 @@ steerForce ( pointX, pointY ) ( velocityX, velocityY ) =
                 Nothing
 
         desiredY =
-            if pointY < limit then
+            if pointY < maxBoundary then
                 -- goes down
                 Just maxSpeed
 
-            else if pointY > (height - limit) then
+            else if pointY > (height - maxBoundary) then
                 -- goes up
                 Just -maxSpeed
 
@@ -175,6 +196,7 @@ updateVehiclesPopulation =
                 -- BOUNDARIES
                 ( steerX, steerY ) =
                     steerForce vehicle.point vehicle.velocity
+                        |> limit maxSpeed
 
                 ( accelerationX, accelerationY ) =
                     Tuple.mapBoth ((+) steerX) ((+) steerY) vehicle.acceleration
@@ -182,11 +204,12 @@ updateVehiclesPopulation =
                 -- MOTION
                 ( velocityX, velocityY ) =
                     Tuple.mapBoth ((+) accelerationX) ((+) accelerationY) vehicle.velocity
+                        |> limit maxSpeed
 
                 newPoint =
                     Tuple.mapBoth ((+) velocityX) ((+) velocityY) vehicle.point
             in
-            { vehicle | point = newPoint, velocity = ( velocityX, velocityY ), acceleration = ( accelerationX * 0, accelerationY * 0 ) }
+            { vehicle | point = newPoint, velocity = ( velocityX, velocityY ), acceleration = ( 0, 0 ) }
         )
 
 
