@@ -140,6 +140,11 @@ randomFoodsGenerator amount =
     Random.list amount randomFoodGenerator
 
 
+rollTheDiceGenerator : Random.Generator Float
+rollTheDiceGenerator =
+    Random.float 0 1
+
+
 
 ---- MODEL ----
 
@@ -197,6 +202,8 @@ type Msg
     = Frame Float
     | NewVehicles (List Vehicle)
     | NewFoods (List Point)
+    | RollTheDice Float
+    | NewFood Point
 
 
 steerForce : Point -> Velocity -> ( Float, Float )
@@ -399,13 +406,23 @@ update msg model =
                                         { vehicle | closestFood = Nothing }
                             )
             in
-            ( { model | vehicles = updateVehiclesPopulation newNewVehiclesPopulation, foods = newFoodPopulation }, Cmd.none )
+            ( { model | vehicles = updateVehiclesPopulation newNewVehiclesPopulation, foods = newFoodPopulation }, Random.generate RollTheDice rollTheDiceGenerator )
 
         NewVehicles vehicles ->
             ( { model | vehicles = List.append vehicles model.vehicles }, Cmd.none )
 
         NewFoods foods ->
             ( { model | foods = List.append foods model.foods }, Cmd.none )
+
+        NewFood food ->
+            ( { model | foods = food :: model.foods }, Cmd.none )
+
+        RollTheDice probability ->
+            if probability < 0.01 then
+                ( model, Random.generate NewFood randomFoodGenerator )
+
+            else
+                ( model, Cmd.none )
 
 
 
