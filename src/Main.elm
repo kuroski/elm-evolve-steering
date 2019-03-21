@@ -80,14 +80,39 @@ randomVelocityGenerator =
     Random.map2 (\x y -> normalize ( x, y )) (Random.float 0 1) (Random.float 0 1)
 
 
+randomDnaGenerator : Random.Generator Dna
+randomDnaGenerator =
+    Random.map2 Dna (Random.float -3 3) (Random.float 5 100)
+
+
 randomVehicleGenerator : Random.Generator Vehicle
 randomVehicleGenerator =
-    Random.map3 Vehicle randomPointGenerator randomAccelerationGenerator randomVelocityGenerator
+    Random.map4 Vehicle randomPointGenerator randomAccelerationGenerator randomVelocityGenerator randomDnaGenerator
 
 
 randomVehiclesGenerator : Int -> Random.Generator (List Vehicle)
 randomVehiclesGenerator amount =
     Random.list amount randomVehicleGenerator
+
+
+randomFoodGenerator : Random.Generator Object
+randomFoodGenerator =
+    Random.map2 (\a b -> Food ( a, b )) (Random.float 0 width) (Random.float 0 height)
+
+
+randomFoodsGenerator : Int -> Random.Generator (List Object)
+randomFoodsGenerator amount =
+    Random.list amount randomFoodGenerator
+
+
+objectPoint : Object -> Point
+objectPoint object =
+    case object of
+        Food point ->
+            point
+
+        Poison point ->
+            point
 
 
 
@@ -102,16 +127,23 @@ type alias Velocity =
     ( Float, Float )
 
 
+type alias Dna =
+    { foodAttraction : Float
+    , foodSense : Float
+    }
+
+
 type alias Vehicle =
     { point : Point
     , acceleration : Acceleration
     , velocity : Velocity
+    , dna : Dna
     }
 
 
 type Object
-    = Food Point Float
-    | Poison Point Float
+    = Food Point
+    | Poison Point
 
 
 type alias Model =
@@ -127,7 +159,10 @@ init =
       , vehicles = []
       , objects = []
       }
-    , Random.generate NewVehicles (randomVehiclesGenerator 10)
+    , Cmd.batch
+        [ Random.generate NewVehicles (randomVehiclesGenerator 10)
+        , Random.generate NewFoods (randomFoodsGenerator 20)
+        ]
     )
 
 
@@ -137,8 +172,8 @@ init =
 
 type Msg
     = Frame Float
-    | NewVehicle Vehicle
     | NewVehicles (List Vehicle)
+    | NewFoods (List Object)
 
 
 steerForce : Point -> Velocity -> ( Float, Float )
@@ -217,13 +252,63 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         Frame _ ->
-            ( { model | vehicles = updateVehiclesPopulation model.vehicles }, Cmd.none )
+            let
+                -- EAT
+                newObjectsPopulation =
+                    model.objects
+                        |> List.filter
+                            (\object ->
+                                let
+                                    ( objectX, objectY ) =
+                                        objectPoint object
 
-        NewVehicle vehicle ->
-            ( { model | vehicles = vehicle :: model.vehicles }, Cmd.none )
+                                    closestVehicle =
+                                        model.vehicles
+                                            |> List.foldl
+                                                (\vehicle acc ->
+                                                    let
+                                                        ( pointX, pointY ) =
+                                                            vehicle.point
+
+                                                        distance =
+                                                            magnitude ( pointX - objectX, pointY - objectY )
+                                                    in
+                                                    if distance < vehicle.dna.foodSense then
+                                                        case acc.closestDistance of
+                                                            Just closestDistance ->
+                                                                if distance < closestDistance then
+                                                                    { acc | closest = Just vehicle, closestDistance = Just closestDistance }
+
+                                                                else
+                                                                    acc
+
+                                                            Nothing ->
+                                                                { acc | closest = Just vehicle, closestDistance = Just distance }
+
+                                                    else
+                                                        acc
+                                                )
+                                                { closest = Nothing, closestDistance = Nothing }
+                                in
+                                case ( closestVehicle.closest, closestVehicle.closestDistance ) of
+                                    ( Just vehicle, Just distance ) ->
+                                        if distance < 5 then
+                                            False
+
+                                        else
+                                            True
+
+                                    _ ->
+                                        True
+                            )
+            in
+            ( { model | vehicles = updateVehiclesPopulation model.vehicles, objects = newObjectsPopulation }, Cmd.none )
 
         NewVehicles vehicles ->
             ( { model | vehicles = List.append vehicles model.vehicles }, Cmd.none )
+
+        NewFoods foods ->
+            ( { model | objects = List.append foods model.objects }, Cmd.none )
 
 
 
@@ -232,19 +317,44 @@ update msg model =
 
 view : Model -> Html Msg
 view model =
+    let
+        objects =
+            List.map
+                (\object ->
+                    case object of
+                        Food point ->
+                            shapes [ fill Color.lightGreen ]
+                                [ circle point 4 ]
+
+                        Poison point ->
+                            shapes [ fill Color.lightRed ]
+                                [ circle point 4 ]
+                )
+                model.objects
+    in
     Canvas.toHtml ( width, height )
         [ style "border" "10px solid rgba(0,0,0,0.1)"
         , style "background-color" "black"
         ]
-        [ shapes [ fill Color.black ] [ rect ( 0, 0 ) width height ]
-        , shapes [ fill Color.lightYellow ]
-            (List.map
-                (\vehicle ->
-                    circle vehicle.point 8
+        (List.append
+            [ shapes [ fill Color.black ] [ rect ( 0, 0 ) width height ]
+            , shapes [ fill Color.lightYellow ]
+                (List.map
+                    (\vehicle ->
+                        circle vehicle.point 8
+                    )
+                    model.vehicles
                 )
-                model.vehicles
-            )
-        ]
+            , shapes [ stroke Color.lightYellow ]
+                (List.map
+                    (\vehicle ->
+                        circle vehicle.point vehicle.dna.foodSense
+                    )
+                    model.vehicles
+                )
+            ]
+            objects
+        )
 
 
 
