@@ -29,6 +29,20 @@ maxSpeed =
 ---- HELPERS ----
 
 
+findInList : (a -> Bool) -> List a -> Maybe a
+findInList predicate lst =
+    case lst of
+        [] ->
+            Nothing
+
+        first :: rest ->
+            if predicate first then
+                Just first
+
+            else
+                findInList predicate rest
+
+
 limit : Float -> ( Float, Float ) -> ( Float, Float )
 limit max ( x, y ) =
     let
@@ -59,10 +73,23 @@ magnitude value =
 normalize : ( Float, Float ) -> ( Float, Float )
 normalize ( x, y ) =
     let
+        mag =
+            magnitude ( x, y )
+    in
+    if mag > 0 then
+        ( (x / mag) * maxSpeed, (y / mag) * maxSpeed )
+
+    else
+        ( 0, 0 )
+
+
+
+{--let
         norm =
             (1 / magnitude ( x, y )) * maxSpeed
     in
     ( x * norm, y * norm )
+    --}
 
 
 randomPointGenerator : Random.Generator Point
@@ -87,7 +114,11 @@ randomDnaGenerator =
 
 randomVehicleGenerator : Random.Generator Vehicle
 randomVehicleGenerator =
-    Random.map4 Vehicle randomPointGenerator randomAccelerationGenerator randomVelocityGenerator randomDnaGenerator
+    Random.map4 (\point acceleration velocity dna -> Vehicle point acceleration velocity dna Nothing)
+        randomPointGenerator
+        randomAccelerationGenerator
+        randomVelocityGenerator
+        randomDnaGenerator
 
 
 randomVehiclesGenerator : Int -> Random.Generator (List Vehicle)
@@ -95,24 +126,14 @@ randomVehiclesGenerator amount =
     Random.list amount randomVehicleGenerator
 
 
-randomFoodGenerator : Random.Generator Object
+randomFoodGenerator : Random.Generator Point
 randomFoodGenerator =
-    Random.map2 (\a b -> Food ( a, b )) (Random.float 0 width) (Random.float 0 height)
+    Random.map2 Tuple.pair (Random.float 0 width) (Random.float 0 height)
 
 
-randomFoodsGenerator : Int -> Random.Generator (List Object)
+randomFoodsGenerator : Int -> Random.Generator (List Point)
 randomFoodsGenerator amount =
     Random.list amount randomFoodGenerator
-
-
-objectPoint : Object -> Point
-objectPoint object =
-    case object of
-        Food point ->
-            point
-
-        Poison point ->
-            point
 
 
 
@@ -133,23 +154,23 @@ type alias Dna =
     }
 
 
+type alias ClosestFood =
+    { object : Point, distance : Float }
+
+
 type alias Vehicle =
     { point : Point
     , acceleration : Acceleration
     , velocity : Velocity
     , dna : Dna
+    , closestFood : Maybe ClosestFood
     }
-
-
-type Object
-    = Food Point
-    | Poison Point
 
 
 type alias Model =
     { maxForce : Float
     , vehicles : List Vehicle
-    , objects : List Object
+    , foods : List Point
     }
 
 
@@ -157,7 +178,7 @@ init : ( Model, Cmd Msg )
 init =
     ( { maxForce = 0.5
       , vehicles = []
-      , objects = []
+      , foods = []
       }
     , Cmd.batch
         [ Random.generate NewVehicles (randomVehiclesGenerator 10)
@@ -173,7 +194,7 @@ init =
 type Msg
     = Frame Float
     | NewVehicles (List Vehicle)
-    | NewFoods (List Object)
+    | NewFoods (List Point)
 
 
 steerForce : Point -> Velocity -> ( Float, Float )
@@ -254,61 +275,95 @@ update msg model =
         Frame _ ->
             let
                 -- EAT
-                newObjectsPopulation =
-                    model.objects
-                        |> List.filter
-                            (\object ->
+                newVehiclesPopulation =
+                    model.vehicles
+                        |> List.map
+                            (\vehicle ->
                                 let
-                                    ( objectX, objectY ) =
-                                        objectPoint object
+                                    ( pointX, pointY ) =
+                                        vehicle.point
 
-                                    closestVehicle =
-                                        model.vehicles
+                                    closestFood =
+                                        model.foods
                                             |> List.foldl
-                                                (\vehicle acc ->
+                                                (\food acc ->
                                                     let
-                                                        ( pointX, pointY ) =
-                                                            vehicle.point
+                                                        ( foodX, foodY ) =
+                                                            food
 
                                                         distance =
-                                                            magnitude ( pointX - objectX, pointY - objectY )
+                                                            magnitude ( foodX - pointX, foodY - pointY )
                                                     in
                                                     if distance < vehicle.dna.foodSense then
                                                         case acc.closestDistance of
                                                             Just closestDistance ->
                                                                 if distance < closestDistance then
-                                                                    { acc | closest = Just vehicle, closestDistance = Just closestDistance }
+                                                                    { acc | closest = Just food, closestDistance = Just closestDistance }
 
                                                                 else
                                                                     acc
 
                                                             Nothing ->
-                                                                { acc | closest = Just vehicle, closestDistance = Just distance }
+                                                                { acc | closest = Just food, closestDistance = Just distance }
 
                                                     else
                                                         acc
                                                 )
                                                 { closest = Nothing, closestDistance = Nothing }
                                 in
-                                case ( closestVehicle.closest, closestVehicle.closestDistance ) of
-                                    ( Just vehicle, Just distance ) ->
-                                        if distance < 5 then
-                                            False
-
-                                        else
-                                            True
+                                case ( closestFood.closest, closestFood.closestDistance ) of
+                                    ( Just closest, Just distance ) ->
+                                        { vehicle | closestFood = Just (ClosestFood closest distance) }
 
                                     _ ->
+                                        vehicle
+                            )
+
+                newObjectsPopulation =
+                    model.foods
+                        |> List.filter
+                            (\point ->
+                                let
+                                    closestVehicle =
+                                        model.vehicles
+                                            |> findInList
+                                                (\vehicle ->
+                                                    case vehicle.closestFood of
+                                                        Just closestFood ->
+                                                            if closestFood.object == point then
+                                                                True
+
+                                                            else
+                                                                False
+
+                                                        Nothing ->
+                                                            False
+                                                )
+                                in
+                                case closestVehicle of
+                                    Just { closestFood } ->
+                                        case closestFood of
+                                            Just { distance } ->
+                                                if distance < 5 then
+                                                    False
+
+                                                else
+                                                    True
+
+                                            Nothing ->
+                                                True
+
+                                    Nothing ->
                                         True
                             )
             in
-            ( { model | vehicles = updateVehiclesPopulation model.vehicles, objects = newObjectsPopulation }, Cmd.none )
+            ( { model | vehicles = updateVehiclesPopulation newVehiclesPopulation, foods = newObjectsPopulation }, Cmd.none )
 
         NewVehicles vehicles ->
             ( { model | vehicles = List.append vehicles model.vehicles }, Cmd.none )
 
         NewFoods foods ->
-            ( { model | objects = List.append foods model.objects }, Cmd.none )
+            ( { model | foods = List.append foods model.foods }, Cmd.none )
 
 
 
@@ -318,19 +373,13 @@ update msg model =
 view : Model -> Html Msg
 view model =
     let
-        objects =
+        foods =
             List.map
-                (\object ->
-                    case object of
-                        Food point ->
-                            shapes [ fill Color.lightGreen ]
-                                [ circle point 4 ]
-
-                        Poison point ->
-                            shapes [ fill Color.lightRed ]
-                                [ circle point 4 ]
+                (\food ->
+                    shapes [ fill Color.lightGreen ]
+                        [ circle food 4 ]
                 )
-                model.objects
+                model.foods
     in
     Canvas.toHtml ( width, height )
         [ style "border" "10px solid rgba(0,0,0,0.1)"
@@ -345,15 +394,8 @@ view model =
                     )
                     model.vehicles
                 )
-            , shapes [ stroke Color.lightYellow ]
-                (List.map
-                    (\vehicle ->
-                        circle vehicle.point vehicle.dna.foodSense
-                    )
-                    model.vehicles
-                )
             ]
-            objects
+            foods
         )
 
 
