@@ -21,14 +21,28 @@ height =
     600
 
 
+maxSpeed =
+    3.0
+
+
 
 ---- HELPERS ----
 
 
 magnitude : ( Float, Float ) -> Float
 magnitude ( x, y ) =
+    -- 93, 43
     ((x * x) + (y * y))
         |> sqrt
+
+
+normalize : ( Float, Float ) -> ( Float, Float )
+normalize ( x, y ) =
+    let
+        norm =
+            (1 / magnitude ( x, y )) * maxSpeed
+    in
+    ( x * norm, y * norm )
 
 
 randomPointGenerator : Random.Generator Point
@@ -43,7 +57,7 @@ randomAccelerationGenerator =
 
 randomVelocityGenerator : Random.Generator Velocity
 randomVelocityGenerator =
-    Random.map2 Tuple.pair (Random.float 0 100) (Random.float 0 100)
+    Random.map2 (\x y -> normalize ( x, y )) (Random.float 0 100) (Random.float 0 100)
 
 
 randomVehicleGenerator : Random.Generator Vehicle
@@ -82,7 +96,6 @@ type Object
 
 type alias Model =
     { maxForce : Float
-    , maxSpeed : Float
     , vehicles : List Vehicle
     , objects : List Object
     }
@@ -91,7 +104,6 @@ type alias Model =
 init : ( Model, Cmd Msg )
 init =
     ( { maxForce = 0.5
-      , maxSpeed = 3.0
       , vehicles = []
       , objects = []
       }
@@ -109,6 +121,53 @@ type Msg
     | NewVehicles (List Vehicle)
 
 
+steerForce : Point -> Velocity -> ( Float, Float )
+steerForce ( pointX, pointY ) ( velocityX, velocityY ) =
+    let
+        limit =
+            10
+
+        desiredX =
+            if pointX < limit then
+                -- goes right
+                Just maxSpeed
+
+            else if pointX > (width - limit) then
+                -- goes left
+                Just -maxSpeed
+
+            else
+                Nothing
+
+        desiredY =
+            if pointY < limit then
+                -- goes down
+                Just maxSpeed
+
+            else if pointY > (height - limit) then
+                -- goes up
+                Just -maxSpeed
+
+            else
+                Nothing
+
+        ( normalizedX, normalizedY ) =
+            case ( desiredX, desiredY ) of
+                ( Just x, Just y ) ->
+                    normalize ( x, y )
+
+                ( Just x, Nothing ) ->
+                    normalize ( x, velocityY )
+
+                ( Nothing, Just y ) ->
+                    normalize ( velocityX, y )
+
+                ( Nothing, Nothing ) ->
+                    ( velocityX, velocityY )
+    in
+    ( normalizedX - velocityX, normalizedY - velocityY )
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
@@ -119,75 +178,11 @@ update msg model =
                         (\vehicle ->
                             let
                                 -- BOUNDARIES
-                                limit =
-                                    10
-
-                                desiredX =
-                                    if Tuple.first vehicle.point < limit then
-                                        Just model.maxSpeed
-
-                                    else if Tuple.first vehicle.point > (width - limit) then
-                                        Just -model.maxSpeed
-
-                                    else
-                                        Nothing
-
-                                desiredY =
-                                    if Tuple.second vehicle.point < limit then
-                                        Just model.maxSpeed
-
-                                    else if Tuple.second vehicle.point > (height - limit) then
-                                        Just -model.maxSpeed
-
-                                    else
-                                        Nothing
-
-                                steer =
-                                    case ( desiredX, desiredY ) of
-                                        ( Just x, Just y ) ->
-                                            let
-                                                mag =
-                                                    magnitude ( x, y )
-
-                                                normalizedX =
-                                                    x * (1 / mag) * model.maxSpeed
-
-                                                normalizedY =
-                                                    y * (1 / mag) * model.maxSpeed
-                                            in
-                                            Tuple.mapBoth ((-) normalizedX) ((-) normalizedY) vehicle.velocity
-
-                                        ( Just x, Nothing ) ->
-                                            let
-                                                mag =
-                                                    magnitude ( x, Tuple.second vehicle.velocity )
-
-                                                normalizedX =
-                                                    x * (1 / mag) * model.maxSpeed
-
-                                                normalizedY =
-                                                    Tuple.second vehicle.velocity * (1 / mag) * model.maxSpeed
-                                            in
-                                            Tuple.mapBoth ((-) normalizedX) ((-) normalizedY) vehicle.velocity
-
-                                        ( Nothing, Just y ) ->
-                                            let
-                                                mag =
-                                                    magnitude ( Tuple.first vehicle.velocity, y )
-
-                                                normalizedX =
-                                                    Tuple.first vehicle.velocity * (1 / mag) * model.maxSpeed
-
-                                                normalizedY =
-                                                    y * (1 / mag) * model.maxSpeed
-                                            in
-                                            Tuple.mapBoth ((-) normalizedX) ((-) normalizedY) vehicle.velocity
-
-                                        ( Nothing, Nothing ) ->
-                                            ( 0, 0 )
+                                ( steerX, steerY ) =
+                                    steerForce vehicle.point vehicle.velocity
 
                                 newAcceleration =
-                                    Tuple.mapBoth ((+) (Tuple.first steer)) ((+) (Tuple.second steer)) vehicle.acceleration
+                                    Tuple.mapBoth ((+) steerX) ((+) steerY) vehicle.acceleration
 
                                 -- MOTION
                                 accelerationX =
@@ -215,38 +210,10 @@ update msg model =
             ( { model | vehicles = newPopulation }, Cmd.none )
 
         NewVehicle vehicle ->
-            let
-                mag =
-                    magnitude vehicle.velocity
-
-                normalizedVelocity =
-                    Tuple.mapBoth
-                        ((*) ((1 / mag) * model.maxSpeed))
-                        ((*) ((1 / mag) * model.maxSpeed))
-                        vehicle.velocity
-            in
             ( { model | vehicles = vehicle :: model.vehicles }, Cmd.none )
 
         NewVehicles vehicles ->
-            let
-                normalizedVehicles =
-                    List.map
-                        (\vehicle ->
-                            let
-                                mag =
-                                    magnitude vehicle.velocity
-
-                                normalizedVelocity =
-                                    Tuple.mapBoth
-                                        ((*) ((1 / mag) * model.maxSpeed))
-                                        ((*) ((1 / mag) * model.maxSpeed))
-                                        vehicle.velocity
-                            in
-                            { vehicle | velocity = normalizedVelocity }
-                        )
-                        vehicles
-            in
-            ( { model | vehicles = List.append normalizedVehicles model.vehicles }, Cmd.none )
+            ( { model | vehicles = List.append vehicles model.vehicles }, Cmd.none )
 
 
 
