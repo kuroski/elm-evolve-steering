@@ -77,23 +77,10 @@ magnitude value =
 normalize : ( Float, Float ) -> ( Float, Float )
 normalize ( x, y ) =
     let
-        mag =
-            magnitude ( x, y )
-    in
-    if mag > 0 then
-        ( (x / mag) * maxSpeed, (y / mag) * maxSpeed )
-
-    else
-        ( 0, 0 )
-
-
-
-{--let
         norm =
             (1 / magnitude ( x, y )) * maxSpeed
     in
     ( x * norm, y * norm )
-    --}
 
 
 randomPointGenerator : Random.Generator Point
@@ -108,7 +95,7 @@ randomAccelerationGenerator =
 
 randomVelocityGenerator : Random.Generator Velocity
 randomVelocityGenerator =
-    Random.map2 (\x y -> normalize ( x, y )) (Random.float 0 1) (Random.float 0 1)
+    Random.map2 (\x y -> normalize ( x, y ) |> Tuple.mapBoth ((*) maxSpeed) ((*) maxSpeed)) (Random.float 0 1) (Random.float 0 1)
 
 
 randomDnaGenerator : Random.Generator Dna
@@ -188,7 +175,7 @@ init =
       , foods = []
       }
     , Cmd.batch
-        [ Random.generate NewVehicles (randomVehiclesGenerator 10)
+        [ Random.generate NewVehicles (randomVehiclesGenerator 1)
         , Random.generate NewFoods (randomFoodsGenerator 20)
         ]
     )
@@ -296,13 +283,14 @@ findClosestFood foods vehicles =
                                             food
 
                                         distance =
-                                            magnitude ( foodX - pointX, foodY - pointY )
+                                            ( pointX - foodX, pointY - foodY )
+                                                |> magnitude
                                     in
                                     if distance < vehicle.dna.foodSense then
                                         case acc of
                                             Just closest ->
                                                 if distance < closest.distance then
-                                                    Just (ClosestFood food closest.distance)
+                                                    Just (ClosestFood food distance)
 
                                                 else
                                                     acc
@@ -350,7 +338,7 @@ eatFood foods vehicles =
                     Just { closestFood } ->
                         case closestFood of
                             Just { distance } ->
-                                if distance < 15 then
+                                if distance < 8 then
                                     False
 
                                 else
@@ -419,7 +407,8 @@ update msg model =
 
         RollTheDice probability ->
             if probability < 0.01 then
-                ( model, Random.generate NewFood randomFoodGenerator )
+                -- ( model, Random.generate NewFood randomFoodGenerator )
+                ( model, Cmd.none )
 
             else
                 ( model, Cmd.none )
