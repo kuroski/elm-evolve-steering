@@ -352,6 +352,36 @@ eatFood foods vehicles =
             )
 
 
+seekFood : List Vehicle -> List Vehicle
+seekFood =
+    List.map
+        (\vehicle ->
+            case vehicle.closestFood of
+                Just closestFood ->
+                    let
+                        ( foodX, foodY ) =
+                            closestFood.food
+
+                        ( pointX, pointY ) =
+                            vehicle.point
+
+                        ( accelerationX, accelerationY ) =
+                            vehicle.acceleration
+
+                        ( steerX, steerY ) =
+                            ( foodX - pointX, foodY - pointY )
+                                |> normalize
+                                |> Tuple.mapBoth ((*) maxSpeed) ((*) maxSpeed)
+                                |> Tuple.mapBoth ((*) vehicle.dna.foodAttraction) ((*) vehicle.dna.foodAttraction)
+                                |> limit maxForce
+                    in
+                    { vehicle | closestFood = Nothing, acceleration = ( accelerationX + steerX, accelerationY + steerY ) }
+
+                Nothing ->
+                    { vehicle | closestFood = Nothing }
+        )
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
@@ -366,33 +396,8 @@ update msg model =
 
                 -- SEEK
                 newNewVehiclesPopulation =
-                    newVehiclesPopulation
-                        |> List.map
-                            (\vehicle ->
-                                case vehicle.closestFood of
-                                    Just closestFood ->
-                                        let
-                                            ( foodX, foodY ) =
-                                                closestFood.food
-
-                                            ( pointX, pointY ) =
-                                                vehicle.point
-
-                                            ( accelerationX, accelerationY ) =
-                                                vehicle.acceleration
-
-                                            ( steerX, steerY ) =
-                                                ( foodX - pointX, foodY - pointY )
-                                                    |> normalize
-                                                    |> Tuple.mapBoth ((*) maxSpeed) ((*) maxSpeed)
-                                                    |> Tuple.mapBoth ((*) vehicle.dna.foodAttraction) ((*) vehicle.dna.foodAttraction)
-                                                    |> limit maxForce
-                                        in
-                                        { vehicle | closestFood = Nothing, acceleration = ( accelerationX + steerX, accelerationY + steerY ) }
-
-                                    Nothing ->
-                                        { vehicle | closestFood = Nothing }
-                            )
+                    seekFood
+                        newVehiclesPopulation
             in
             ( { model | vehicles = updateVehiclesPopulation newNewVehiclesPopulation, foods = newFoodPopulation }, Random.generate RollTheDice rollTheDiceGenerator )
 
