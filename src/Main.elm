@@ -29,6 +29,10 @@ maxForce =
     0.5
 
 
+eatRadius =
+    8
+
+
 
 ---- HELPERS ----
 
@@ -105,7 +109,7 @@ randomDnaGenerator =
 
 randomVehicleGenerator : Random.Generator Vehicle
 randomVehicleGenerator =
-    Random.map4 (\point acceleration velocity dna -> Vehicle point acceleration velocity dna Nothing)
+    Random.map4 (\point acceleration velocity dna -> Vehicle point acceleration velocity dna 1.0 Nothing)
         randomPointGenerator
         randomAccelerationGenerator
         randomVelocityGenerator
@@ -159,6 +163,7 @@ type alias Vehicle =
     , acceleration : Acceleration
     , velocity : Velocity
     , dna : Dna
+    , health : Float
     , closestFood : Maybe ClosestFood
     }
 
@@ -261,7 +266,7 @@ updateVehiclesPopulation =
                 newPoint =
                     Tuple.mapBoth ((+) velocityX) ((+) velocityY) vehicle.point
             in
-            { vehicle | point = newPoint, velocity = ( velocityX, velocityY ), acceleration = ( 0, 0 ) }
+            { vehicle | point = newPoint, velocity = ( velocityX, velocityY ), acceleration = ( 0, 0 ), health = vehicle.health - 0.01 }
         )
 
 
@@ -338,7 +343,7 @@ eatFood foods vehicles =
                     Just { closestFood } ->
                         case closestFood of
                             Just { distance } ->
-                                if distance < 8 then
+                                if distance < eatRadius then
                                     False
 
                                 else
@@ -375,11 +380,20 @@ seekFood =
                                 |> Tuple.mapBoth ((*) vehicle.dna.foodAttraction) ((*) vehicle.dna.foodAttraction)
                                 |> limit maxForce
                     in
-                    { vehicle | closestFood = Nothing, acceleration = ( accelerationX + steerX, accelerationY + steerY ) }
+                    if closestFood.distance < eatRadius then
+                        { vehicle | closestFood = Nothing, acceleration = ( accelerationX + steerX, accelerationY + steerY ), health = vehicle.health + 0.3 }
+
+                    else
+                        { vehicle | closestFood = Nothing, acceleration = ( accelerationX + steerX, accelerationY + steerY ) }
 
                 Nothing ->
                     { vehicle | closestFood = Nothing }
         )
+
+
+killUndeads : List Vehicle -> List Vehicle
+killUndeads =
+    List.filter (.health >> (<=) 0.0)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -396,10 +410,12 @@ update msg model =
 
                 -- SEEK
                 newNewVehiclesPopulation =
-                    seekFood
-                        newVehiclesPopulation
+                    newVehiclesPopulation
+                        |> seekFood
+                        |> updateVehiclesPopulation
+                        |> killUndeads
             in
-            ( { model | vehicles = updateVehiclesPopulation newNewVehiclesPopulation, foods = newFoodPopulation }, Random.generate RollTheDice rollTheDiceGenerator )
+            ( { model | vehicles = newNewVehiclesPopulation, foods = newFoodPopulation }, Random.generate RollTheDice rollTheDiceGenerator )
 
         NewVehicles vehicles ->
             ( { model | vehicles = List.append vehicles model.vehicles }, Cmd.none )
