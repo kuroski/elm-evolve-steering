@@ -26,7 +26,7 @@ maxSpeed =
 
 
 maxForce =
-    0.5
+    0.8
 
 
 eatRadius =
@@ -138,8 +138,8 @@ rollTheDiceGenerator =
 
 reproduceVehicleGenerator : Vehicle -> Random.Generator ( Float, Vehicle )
 reproduceVehicleGenerator vehicle =
-    Random.map2
-        (\adjustFoodAttraction adjustFoodSense ->
+    Random.map3
+        (\adjustFoodAttraction adjustFoodSense adjustVelocity ->
             let
                 foodAttraction =
                     if adjustFoodAttraction < 0.1 then
@@ -154,15 +154,23 @@ reproduceVehicleGenerator vehicle =
 
                     else
                         Random.constant vehicle.dna.foodSense
+
+                velocity =
+                    if adjustVelocity < 0.1 then
+                        randomVelocityGenerator
+
+                    else
+                        Random.constant vehicle.velocity
             in
-            ( foodAttraction, foodSense )
+            ( foodAttraction, foodSense, velocity )
         )
         (Random.float 0 1)
         (Random.float 0 1)
+        (Random.float 0 1)
         |> Random.andThen
-            (\( foodAttractionGenerator, foodSenseGenerator ) ->
-                Random.map3
-                    (\foodAttraction foodSense shouldGenerate ->
+            (\( foodAttractionGenerator, foodSenseGenerator, velocityGenerator ) ->
+                Random.map4
+                    (\foodAttraction foodSense velocity shouldGenerate ->
                         let
                             dna =
                                 vehicle.dna
@@ -187,7 +195,7 @@ reproduceVehicleGenerator vehicle =
                         ( shouldGenerate
                         , Vehicle vehicle.point
                             vehicle.acceleration
-                            vehicle.velocity
+                            velocity
                             newDna
                             1.0
                             Nothing
@@ -195,6 +203,7 @@ reproduceVehicleGenerator vehicle =
                     )
                     foodAttractionGenerator
                     foodSenseGenerator
+                    velocityGenerator
                     (Random.float 0 1)
             )
 
@@ -243,7 +252,7 @@ init =
       , foods = []
       }
     , Cmd.batch
-        [ Random.generate NewVehicles (randomVehiclesGenerator 5)
+        [ Random.generate NewVehicles (randomVehiclesGenerator 10)
         , Random.generate NewFoods (randomFoodsGenerator 40)
         ]
     )
@@ -516,7 +525,7 @@ update msg model =
             ( { model | foods = food :: model.foods }, Cmd.none )
 
         RollTheDice probability ->
-            if probability < 0.01 then
+            if probability < 0.05 then
                 ( model, Random.generate NewFood randomFoodGenerator )
                 -- ( model, Cmd.none )
 
