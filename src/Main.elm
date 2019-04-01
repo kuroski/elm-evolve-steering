@@ -136,6 +136,69 @@ rollTheDiceGenerator =
     Random.float 0 1
 
 
+reproduceVehicleGenerator : Vehicle -> Random.Generator ( Float, Vehicle )
+reproduceVehicleGenerator vehicle =
+    Random.map2
+        (\adjustFoodAttraction adjustFoodSense ->
+            let
+                foodAttraction =
+                    if adjustFoodAttraction < 0.1 then
+                        Random.float -0.1 0.2
+
+                    else
+                        Random.constant vehicle.dna.foodAttraction
+
+                foodSense =
+                    if adjustFoodSense < 0.1 then
+                        Random.float -20 20
+
+                    else
+                        Random.constant vehicle.dna.foodSense
+            in
+            ( foodAttraction, foodSense )
+        )
+        (Random.float 0 1)
+        (Random.float 0 1)
+        |> Random.andThen
+            (\( foodAttractionGenerator, foodSenseGenerator ) ->
+                Random.map3
+                    (\foodAttraction foodSense shouldGenerate ->
+                        let
+                            dna =
+                                vehicle.dna
+
+                            newFoodAttraction =
+                                if foodAttraction == dna.foodAttraction then
+                                    dna.foodAttraction
+
+                                else
+                                    dna.foodAttraction + foodAttraction
+
+                            newFoodSense =
+                                if foodSense == dna.foodSense then
+                                    dna.foodSense
+
+                                else
+                                    dna.foodSense + foodSense
+
+                            newDna =
+                                { dna | foodAttraction = newFoodAttraction, foodSense = newFoodSense }
+                        in
+                        ( shouldGenerate
+                        , Vehicle vehicle.point
+                            vehicle.acceleration
+                            vehicle.velocity
+                            newDna
+                            1.0
+                            Nothing
+                        )
+                    )
+                    foodAttractionGenerator
+                    foodSenseGenerator
+                    (Random.float 0 1)
+            )
+
+
 
 ---- MODEL ----
 
@@ -181,7 +244,7 @@ init =
       }
     , Cmd.batch
         [ Random.generate NewVehicles (randomVehiclesGenerator 1)
-        , Random.generate NewFoods (randomFoodsGenerator 20)
+        , Random.generate NewFoods (randomFoodsGenerator 40)
         ]
     )
 
@@ -196,6 +259,7 @@ type Msg
     | NewFoods (List Point)
     | RollTheDice Float
     | NewFood Point
+    | NewVehicle ( Float, Vehicle )
 
 
 steerForce : Point -> Velocity -> ( Float, Float )
@@ -266,7 +330,7 @@ updateVehiclesPopulation =
                 newPoint =
                     Tuple.mapBoth ((+) velocityX) ((+) velocityY) vehicle.point
             in
-            { vehicle | point = newPoint, velocity = ( velocityX, velocityY ), acceleration = ( 0, 0 ), health = vehicle.health - 0.01 }
+            { vehicle | point = newPoint, velocity = ( velocityX, velocityY ), acceleration = ( 0, 0 ), health = vehicle.health - 0.005 }
         )
 
 
@@ -414,11 +478,39 @@ update msg model =
                         |> seekFood
                         |> updateVehiclesPopulation
                         |> killUndeads
+
+                generateBirthVehicles =
+                    newNewVehiclesPopulation
+                        |> List.map (\vehicle -> Random.generate NewVehicle (reproduceVehicleGenerator vehicle))
             in
-            ( { model | vehicles = newNewVehiclesPopulation, foods = newFoodPopulation }, Random.generate RollTheDice rollTheDiceGenerator )
+            ( { model
+                | vehicles = newNewVehiclesPopulation
+                , foods = newFoodPopulation
+              }
+            , Cmd.batch
+                (List.append
+                    [ Random.generate RollTheDice rollTheDiceGenerator
+                    ]
+                    generateBirthVehicles
+                )
+            )
 
         NewVehicles vehicles ->
             ( { model | vehicles = List.append vehicles model.vehicles }, Cmd.none )
+
+        NewVehicle ( shouldGenerate, vehicle ) ->
+            if shouldGenerate < 0.001 then
+                let
+                    newVehicles =
+                        vehicle :: model.vehicles
+
+                    _ =
+                        Debug.log "bla" (List.length newVehicles)
+                in
+                ( { model | vehicles = newVehicles }, Cmd.none )
+
+            else
+                ( model, Cmd.none )
 
         NewFoods foods ->
             ( { model | foods = List.append foods model.foods }, Cmd.none )
@@ -428,8 +520,8 @@ update msg model =
 
         RollTheDice probability ->
             if probability < 0.01 then
-                -- ( model, Random.generate NewFood randomFoodGenerator )
-                ( model, Cmd.none )
+                ( model, Random.generate NewFood randomFoodGenerator )
+                -- ( model, Cmd.none )
 
             else
                 ( model, Cmd.none )
@@ -460,6 +552,13 @@ view model =
                 (List.map
                     (\vehicle ->
                         circle vehicle.point 8
+                    )
+                    model.vehicles
+                )
+            , shapes [ stroke Color.lightYellow ]
+                (List.map
+                    (\vehicle ->
+                        circle vehicle.point vehicle.dna.foodSense
                     )
                     model.vehicles
                 )
