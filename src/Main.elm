@@ -243,7 +243,7 @@ init =
       , foods = []
       }
     , Cmd.batch
-        [ Random.generate NewVehicles (randomVehiclesGenerator 1)
+        [ Random.generate NewVehicles (randomVehiclesGenerator 5)
         , Random.generate NewFoods (randomFoodsGenerator 40)
         ]
     )
@@ -503,9 +503,6 @@ update msg model =
                 let
                     newVehicles =
                         vehicle :: model.vehicles
-
-                    _ =
-                        Debug.log "bla" (List.length newVehicles)
                 in
                 ( { model | vehicles = newVehicles }, Cmd.none )
 
